@@ -25,20 +25,6 @@ jobs:
           git config user.email "you@example.com"
           git config user.name "yudharn"
 
-      - name: Simpan semua perubahan lokal sejak sync terakhir
-        run: |
-          cd repo-kamu
-          mkdir -p /tmp/patches-backup
-          if git ls-remote --exit-code --heads origin ${{ github.event.inputs.target_branch }} >/dev/null 2>&1; then
-            git checkout ${{ github.event.inputs.target_branch }}
-            BASE=$(git rev-list --max-parents=0 HEAD | tail -1)
-            git format-patch "$BASE"..HEAD -o /tmp/patches-backup/ || true
-            echo "Base sebelumnya: $BASE"
-            echo "Perubahan lokal ditemukan: $(ls /tmp/patches-backup | wc -l) commit"
-          else
-            echo "Branch belum ada di remote, tidak ada yang perlu disimpan."
-          fi
-
       - name: Ambil source dari repo lain
         run: |
           cd repo-kamu
@@ -51,36 +37,6 @@ jobs:
           git checkout --orphan import-temp external/${{ github.event.inputs.source_branch }}
           git add -A
           git commit -m "Import source dari ${{ github.event.inputs.source_url }} (${{ github.event.inputs.source_branch }})"
-
-      - name: Terapkan ulang semua perubahan lokal (paksa menang)
-        run: |
-          cd repo-kamu
-          shopt -s nullglob
-          PATCHES=(/tmp/patches-backup/*.patch)
-          if [ ${#PATCHES[@]} -gt 0 ]; then
-            for patch in "${PATCHES[@]}"; do
-              echo "Menerapkan $(basename "$patch") (paksa menang jika bentrok) ..."
-              if ! git am -3 -X theirs "$patch"; then
-                echo "::warning::Konflik tersisa di $(basename "$patch"), memaksa pilih versi lokal per file..."
-                while IFS= read -r f; do
-                  [ -z "$f" ] && continue
-                  if [ -f "$f" ]; then
-                    git checkout --theirs -- "$f"
-                    git add "$f"
-                  else
-                    git rm -f "$f" 2>/dev/null || true
-                  fi
-                done < <(git diff --name-only --diff-filter=U)
-                if ! git am --continue; then
-                  echo "::error::Tetap gagal menerapkan $(basename "$patch") walau sudah dipaksa. Kemungkinan ada masalah struktural (bukan sekadar konflik baris)."
-                  git am --abort
-                  exit 1
-                fi
-              fi
-            done
-          else
-            echo "Tidak ada perubahan lokal untuk diterapkan ulang."
-          fi
 
       - name: Push hasil import
         run: |
