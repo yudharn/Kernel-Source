@@ -7,7 +7,7 @@ on:
         description: "Kernel source repo URL for marble (Melt Kernel). Paste any git URL here to override the default."
         required: true
         type: choice
-        default: "https://github.com/yudharn/Pzqqt-Melt-Rebase"
+        default: "https://github.com/yudharn/Kernel-Source"
         options:
           - https://github.com/yudharn/Kernel-Source
 
