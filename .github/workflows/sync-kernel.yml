@@ -9,16 +9,26 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Clone repo kamu
+      - name: Clone repo kamu (full history)
         run: |
           git clone https://x-access-token:${{ secrets.GH_PAT }}@github.com/yudharn/Kernel-Source.git repo-kamu
+          cd repo-kamu
+          git config user.email "you@example.com"
+          git config user.name "yudharn"
 
-      - name: Backup folder patches
+      - name: Simpan semua perubahan lokal sejak sync terakhir
         run: |
           cd repo-kamu
-          git checkout android12-5.10-lts
           mkdir -p /tmp/patches-backup
-          if [ -d patches ]; then cp -r patches/* /tmp/patches-backup/ 2>/dev/null || true; fi
+          if git rev-parse --verify android12-5.10-lts >/dev/null 2>&1; then
+            git checkout android12-5.10-lts
+            BASE=$(git rev-list --max-parents=0 HEAD | tail -1)
+            git format-patch "$BASE"..HEAD -o /tmp/patches-backup/ || true
+            echo "Base sebelumnya: $BASE"
+            echo "Perubahan lokal ditemukan: $(ls /tmp/patches-backup | wc -l) commit"
+          else
+            echo "Branch belum ada, tidak ada yang perlu disimpan."
+          fi
 
       - name: Ambil source terbaru dari upstream
         run: |
@@ -29,28 +39,27 @@ jobs:
       - name: Buat base baru dari upstream
         run: |
           cd repo-kamu
-          git config user.email "you@example.com"
-          git config user.name "yudharn"
           git checkout --orphan sync-temp upstream/android12-5.10-lts
           git add -A
           git commit -m "Base sync dari upstream android12-5.10-lts"
 
-      - name: Terapkan ulang semua patch tersimpan
+      - name: Terapkan ulang semua perubahan lokal
         run: |
           cd repo-kamu
-          mkdir -p patches
-          cp -r /tmp/patches-backup/* patches/ 2>/dev/null || true
           shopt -s nullglob
-          for patch in patches/*.patch; do
-            echo "Menerapkan $patch ..."
-            if ! git am "$patch"; then
-              echo "::error::Gagal menerapkan $patch — kemungkinan bentrok dengan source upstream terbaru."
-              git am --abort
-              exit 1
-            fi
-          done
-          git add -f patches
-          git commit -m "Simpan folder patches" --allow-empty
+          PATCHES=(/tmp/patches-backup/*.patch)
+          if [ ${#PATCHES[@]} -gt 0 ]; then
+            for patch in "${PATCHES[@]}"; do
+              echo "Menerapkan $(basename "$patch") ..."
+              if ! git am "$patch"; then
+                echo "::error::Gagal menerapkan $(basename "$patch") — bentrok dengan source upstream terbaru. Sync dibatalkan, repo lama TIDAK berubah."
+                git am --abort
+                exit 1
+              fi
+            done
+          else
+            echo "Tidak ada perubahan lokal untuk diterapkan ulang."
+          fi
 
       - name: Push hasil sync
         run: |
