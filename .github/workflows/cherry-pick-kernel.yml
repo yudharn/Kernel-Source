@@ -15,7 +15,11 @@ on:
       target_branch:
         description: 'Branch tujuan di repo kamu'
         required: true
-        default: 'android12-5.10-lts'
+        type: choice
+        default: "android12-5.10-lts"
+        options:        
+           - android12-5.10-lts
+           - yudharn
 
 jobs:
   cherry-pick:
