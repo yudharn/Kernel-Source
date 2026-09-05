@@ -13,48 +13,20 @@ jobs:
         run: |
           git clone https://x-access-token:${{ secrets.GH_PAT }}@github.com/yudharn/Kernel-Source.git repo-kamu
 
-      - name: Backup folder patches
-        run: |
-          cd repo-kamu
-          git checkout android12-5.10-lts
-          mkdir -p /tmp/patches-backup
-          if [ -d patches ]; then cp -r patches/* /tmp/patches-backup/ 2>/dev/null || true; fi
-
-      - name: Ambil source terbaru dari upstream
+      - name: Tambah remote upstream & ambil update
         run: |
           cd repo-kamu
           git remote add upstream https://android.googlesource.com/kernel/common
           git fetch --depth=1 upstream android12-5.10-lts
 
-      - name: Buat base baru dari upstream
+      - name: Buat commit baru & push
         run: |
           cd repo-kamu
           git config user.email "you@example.com"
           git config user.name "yudharn"
           git checkout --orphan sync-temp upstream/android12-5.10-lts
           git add -A
-          git commit -m "Base sync dari upstream android12-5.10-lts"
-
-      - name: Terapkan ulang semua patch tersimpan
-        run: |
-          cd repo-kamu
-          mkdir -p patches
-          cp -r /tmp/patches-backup/* patches/ 2>/dev/null || true
-          shopt -s nullglob
-          for patch in patches/*.patch; do
-            echo "Menerapkan $patch ..."
-            if ! git am "$patch"; then
-              echo "::error::Gagal menerapkan $patch — kemungkinan bentrok dengan source upstream terbaru."
-              git am --abort
-              exit 1
-            fi
-          done
-          git add patches
-          git commit -m "Simpan folder patches" --allow-empty
-
-      - name: Push hasil sync
-        run: |
-          cd repo-kamu
+          git commit -m "Sync kernel source dari upstream android12-5.10-lts"
           git branch -D android12-5.10-lts || true
           git branch -m android12-5.10-lts
           git push --force https://x-access-token:${{ secrets.GH_PAT }}@github.com/yudharn/Kernel-Source.git android12-5.10-lts
