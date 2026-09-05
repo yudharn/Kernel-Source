@@ -24,7 +24,7 @@ on:
         description: "Clang/LLVM toolchain download URL (.tar.xz)"
         required: true
         type: string
-        default: "https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-23.1.0-x86_64.tar.xz"
+        default: "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-Linux-X64.tar.xz"
 
       manager_official_kernelsu:
         description: "Build Official-KernelSU"
@@ -217,9 +217,9 @@ jobs:
           mkdir -p "${GITHUB_WORKSPACE}/toolchains/llvm-toolchain"
           cd "${GITHUB_WORKSPACE}/toolchains/llvm-toolchain"
           echo "Downloading Slim LLVM..."
-          aria2c https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-23.1.0-x86_64.tar.xz
-          tar -xJf ./llvm-23.1.0-x86_64.tar.xz
-          rm -f ./llvm-23.1.0-x86_64.tar.xz
+          aria2c https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-Linux-X64.tar.xz
+          tar -xJf ./LLVM-22.1.8-Linux-X64.tar.xz
+          rm -f ./LLVM-22.1.8-Linux-X64.tar.xz
 
       - name: Configure ccache dir and key
         run: |
