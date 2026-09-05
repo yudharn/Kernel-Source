@@ -24,7 +24,7 @@ on:
         description: "Clang/LLVM toolchain download URL (.tar.xz)"
         required: true
         type: string
-        default: "https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.0/LLVM-23.1.0-Linux-X64.tar.xz"
+        default: "https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-23.1.0-x86_64.tar.xz"
 
       manager_official_kernelsu:
         description: "Build Official-KernelSU"
@@ -168,6 +168,9 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y \
+          aria2 \
+          python-is-python3 \
+          python3-rich \
           bc bison flex \
           libssl-dev \
           libelf-dev \
@@ -211,12 +214,11 @@ jobs:
 
       - name: Download Clang/LLVM Toolchain
         run: |
-          mkdir -p toolchains
-          cd toolchains
-          CLANG_ARCHIVE=$(basename "${{ inputs.clang_url }}")
-          wget -q "${{ inputs.clang_url }}" -O "${CLANG_ARCHIVE}"
-          mkdir llvm-toolchain
-          tar -xf "${CLANG_ARCHIVE}" -C llvm-toolchain --strip-components=1
+          mkdir -p ~/build_toolchain
+          echo "Downloading Slim LLVM..."
+          cd ~/build_toolchain
+          aria2c https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-23.1.0-x86_64.tar.xz
+          tar -xJf ./llvm-23.1.0-x86_64.tar.xz
 
       - name: Configure ccache dir and key
         run: |
