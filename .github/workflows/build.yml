@@ -9,8 +9,6 @@ on:
         type: choice
         default: "https://github.com/yudharn/Pzqqt-Melt-Rebase"
         options:
-          - https://github.com/yudharn/Pzqqt-Melt-Rebase
-          - https://github.com/Yudharmdn/Guxin12-Melt-Rebase
           - https://github.com/yudharn/Kernel-Source
 
       kernel_branch:
@@ -19,9 +17,6 @@ on:
         type: choice
         default: "Yudharn-melt-rebase"
         options:
-          - melt-rebase
-          - melt-Guxin12-A
-          - Yudharn-melt-rebase
           - android12-5.10-lts
           - yudharn
 
