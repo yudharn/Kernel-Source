@@ -15,7 +15,7 @@ on:
         description: "Branch on kernel_source above"
         required: true
         type: choice
-        default: "Yudharn-melt-rebase"
+        default: "android12-5.10-lts"
         options:
           - android12-5.10-lts
           - yudharn
