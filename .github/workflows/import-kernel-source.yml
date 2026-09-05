@@ -52,18 +52,30 @@ jobs:
           git add -A
           git commit -m "Import source dari ${{ github.event.inputs.source_url }} (${{ github.event.inputs.source_branch }})"
 
-      - name: Terapkan ulang semua perubahan lokal
+      - name: Terapkan ulang semua perubahan lokal (paksa menang)
         run: |
           cd repo-kamu
           shopt -s nullglob
           PATCHES=(/tmp/patches-backup/*.patch)
           if [ ${#PATCHES[@]} -gt 0 ]; then
             for patch in "${PATCHES[@]}"; do
-              echo "Menerapkan $(basename "$patch") ..."
-              if ! git am "$patch"; then
-                echo "::error::Gagal menerapkan $(basename "$patch") — bentrok dengan source baru. Import dibatalkan, repo lama TIDAK berubah."
-                git am --abort
-                exit 1
+              echo "Menerapkan $(basename "$patch") (paksa menang jika bentrok) ..."
+              if ! git am -3 -X theirs "$patch"; then
+                echo "::warning::Konflik tersisa di $(basename "$patch"), memaksa pilih versi lokal per file..."
+                while IFS= read -r f; do
+                  [ -z "$f" ] && continue
+                  if [ -f "$f" ]; then
+                    git checkout --theirs -- "$f"
+                    git add "$f"
+                  else
+                    git rm -f "$f" 2>/dev/null || true
+                  fi
+                done < <(git diff --name-only --diff-filter=U)
+                if ! git am --continue; then
+                  echo "::error::Tetap gagal menerapkan $(basename "$patch") walau sudah dipaksa. Kemungkinan ada masalah struktural (bukan sekadar konflik baris)."
+                  git am --abort
+                  exit 1
+                fi
               fi
             done
           else
