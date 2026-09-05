@@ -221,25 +221,6 @@ jobs:
           tar -xJf ./llvm-23.1.0-x86_64.tar.xz
           rm -f ./llvm-23.1.0-x86_64.tar.xz
 
-          # Cari di mana persisnya 'clang' berada (jaga-jaga kalau arsip punya folder pembungkus)
-          CLANG_BIN_DIR=$(dirname "$(find . -maxdepth 3 -type f -name clang | head -n1)")
-
-          if [ -z "$CLANG_BIN_DIR" ] || [ "$CLANG_BIN_DIR" = "." ]; then
-            echo "::error::Tidak ketemu binary 'clang' setelah extract. Isi folder:"
-            find . -maxdepth 2
-            exit 1
-          fi
-
-          # Kalau clang tidak langsung di ./bin, ratakan strukturnya ke ./bin
-          if [ "$CLANG_BIN_DIR" != "./bin" ]; then
-            SRC_ROOT=$(dirname "$CLANG_BIN_DIR")
-            find "${SRC_ROOT}" -maxdepth 1 -mindepth 1 -exec mv {} . \;
-            rmdir "${SRC_ROOT}" 2>/dev/null || true
-          fi
-
-          echo "==> Isi bin/ (contoh 20 file):"
-          ls bin | head -n 20
-
       - name: Configure ccache dir and key
         run: |
           echo "CCACHE_DIR=$HOME/.ccache_marble" >> $GITHUB_ENV
