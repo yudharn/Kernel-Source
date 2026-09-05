@@ -20,14 +20,14 @@ jobs:
         run: |
           cd repo-kamu
           mkdir -p /tmp/patches-backup
-          if git rev-parse --verify android12-5.10-lts >/dev/null 2>&1; then
+          if git ls-remote --exit-code --heads origin android12-5.10-lts >/dev/null 2>&1; then
             git checkout android12-5.10-lts
             BASE=$(git rev-list --max-parents=0 HEAD | tail -1)
             git format-patch "$BASE"..HEAD -o /tmp/patches-backup/ || true
             echo "Base sebelumnya: $BASE"
             echo "Perubahan lokal ditemukan: $(ls /tmp/patches-backup | wc -l) commit"
           else
-            echo "Branch belum ada, tidak ada yang perlu disimpan."
+            echo "Branch belum ada di remote, tidak ada yang perlu disimpan."
           fi
 
       - name: Ambil source terbaru dari upstream
