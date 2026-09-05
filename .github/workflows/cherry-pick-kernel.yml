@@ -4,16 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       source_url:
-        description: 'URL repo kernel sumber (misal https://github.com/xxx/xxx.git)'
+        description: 'URL repo kernel sumber'
         required: true
       source_branch:
-        description: 'Branch di repo sumber tempat commit itu berada'
+        description: 'Branch di repo sumber'
         required: true
       commit_hashes:
-        description: 'Hash commit yang mau diambil, pisahkan spasi, urutan lama ke baru'
+        description: 'Hash commit, pisahkan spasi, urutan lama ke baru'
         required: true
       target_branch:
-        description: 'Branch di repo kamu yang mau ditambahkan patch ini'
+        description: 'Branch tujuan di repo kamu'
         required: true
         default: 'android12-5.10-lts'
 
@@ -21,17 +21,13 @@ jobs:
   cherry-pick:
     runs-on: ubuntu-latest
     steps:
-      - name: Clone repo kamu
+      - name: Clone & setup
         run: |
           git clone https://x-access-token:${{ secrets.GH_PAT }}@github.com/yudharn/Kernel-Source.git repo-kamu
           cd repo-kamu
           git checkout ${{ github.event.inputs.target_branch }}
           git config user.email "you@example.com"
           git config user.name "yudharn"
-
-      - name: Tambah remote sumber & fetch
-        run: |
-          cd repo-kamu
           git remote add external ${{ github.event.inputs.source_url }}
           git fetch external ${{ github.event.inputs.source_branch }}
 
@@ -41,14 +37,25 @@ jobs:
           for hash in ${{ github.event.inputs.commit_hashes }}; do
             echo "Cherry-picking $hash ..."
             if ! git cherry-pick "$hash"; then
-              echo "::error::Konflik saat cherry-pick $hash. Batal, silakan resolve manual di lokal."
-              git status
-              git cherry-pick --abort
-              exit 1
+              echo "CONFLICT=true" >> "$GITHUB_ENV"
+              echo "CONFLICT_HASH=$hash" >> "$GITHUB_ENV"
+              break
             fi
           done
 
-      - name: Push hasil cherry-pick
+      - name: Push langsung kalau sukses
+        if: env.CONFLICT != 'true'
         run: |
           cd repo-kamu
           git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/yudharn/Kernel-Source.git ${{ github.event.inputs.target_branch }}
+
+      - name: Kalau konflik, kirim ke branch sementara
+        if: env.CONFLICT == 'true'
+        run: |
+          cd repo-kamu
+          BRANCH_NAME="resolve-conflict-${{ github.run_number }}"
+          git add -A
+          git commit -m "WIP: konflik cherry-pick $CONFLICT_HASH - perlu resolve manual"
+          git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/yudharn/Kernel-Source.git HEAD:$BRANCH_NAME
+          echo "::error::Konflik di commit $CONFLICT_HASH. Sudah dipush ke branch '$BRANCH_NAME', buka file yang konflik dan resolve manual, lalu buat Pull Request ke ${{ github.event.inputs.target_branch }}."
+          exit 1
