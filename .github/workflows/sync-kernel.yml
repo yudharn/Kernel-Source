@@ -1,0 +1,27 @@
+name: Sync Kernel Source
+
+on:
+  workflow_dispatch:      # jalankan manual lewat tombol "Run workflow"
+  schedule:
+    - cron: '0 0 * * 0'   # otomatis cek update tiap Minggu jam 00:00 UTC
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone repo kamu
+        run: |
+          git clone https://x-access-token:${{ secrets.GH_PAT }}@github.com/yudharn/Kernel-Source.git repo-kamu
+
+      - name: Tambah remote upstream & ambil update
+        run: |
+          cd repo-kamu
+          git remote add upstream https://android.googlesource.com/kernel/common
+          git fetch upstream android12-5.10-lts
+          git checkout android12-5.10-lts || git checkout -b android12-5.10-lts upstream/android12-5.10-lts
+          git merge upstream/android12-5.10-lts --allow-unrelated-histories -m "Sync from upstream android12-5.10-lts"
+
+      - name: Push hasil sync
+        run: |
+          cd repo-kamu
+          git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/yudharn/Kernel-Source.git android12-5.10-lts
