@@ -18,8 +18,8 @@ on:
         default: false
 
 env:
-  KERNEL_SOURCE: "https://github.com/yudharn/Kernel-Source.git"
-  KERNEL_BRANCH: "android12-5.10-lts"
+  KERNEL_SOURCE: "https://github.com/yudharn/Pzqqt-Melt-Rebase.git"
+  KERNEL_BRANCH: "melt-rebase"
   DEFCONFIG: "marble_defconfig"
   ARCH: "arm64"
   SUBARCH: "arm64"
@@ -27,17 +27,14 @@ env:
   DEVICE_NAME: "Redmi Note 12 Turbo / Poco F5"
   ANYKERNEL_REPO: "https://github.com/osm0sis/AnyKernel3.git"
   ANYKERNEL_BRANCH: "master"
-  # AOSP Clang r416183b (Clang 12.0.5) - sesuai dengan yang digunakan Pzqqt
-  CLANG_URL: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/1b91ec5a5c849f0b8a0c2c3f0e3a8b9d9c1a7f2e/clang-r416183b.tar.gz"
-  # Alternatif: Clang terbaru dari AOSP (uncomment jika ingin menggunakan versi terbaru)
-  # CLANG_URL: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-stable.tar.gz"
   KERNEL_IMAGE: "Image"
-  KERNEL_DTB: "dtb"
-  KERNEL_DTBO: "dtbo.img"
+
+permissions:
+  contents: write
 
 jobs:
   build:
-    name: Build Kernel for ${{ env.DEVICE }}
+    name: Build Kernel for marble
     runs-on: ubuntu-latest
 
     steps:
@@ -72,57 +69,35 @@ jobs:
             cpio \
             kmod
           echo "=== Dependencies Installed ==="
-          gcc --version
           make --version
 
       - name: Download AOSP Clang Toolchain
         id: clang
         run: |
-          echo "=== Downloading AOSP Clang Toolchain ==="
+          echo "=== Downloading AOSP Clang r416183b ==="
           mkdir -p $HOME/toolchain/clang
           cd $HOME/toolchain/clang
-          
-          # Gunakan wget dengan curl fallback untuk download
-          if command -v curl &> /dev/null; then
-            curl -sL "${{ env.CLANG_URL }}" -o clang.tar.gz || {
-              echo "curl failed, trying alternative download method..."
-              # Alternatif: download dari GitHub mirror
-              git clone --depth=1 https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r416183b.git .
-              rm -rf .git
-              echo "CLANG_PATH=$HOME/toolchain/clang/bin" >> $GITHUB_OUTPUT
-              echo "=== Clang downloaded via git ==="
-              $HOME/toolchain/clang/bin/clang --version
-              exit 0
-            }
-          else
-            wget -q "${{ env.CLANG_URL }}" -O clang.tar.gz
-          fi
-          
-          if [ -f clang.tar.gz ]; then
-            tar -xzf clang.tar.gz
-            rm -f clang.tar.gz
-          fi
-          
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r416183b.git .
+          rm -rf .git
           echo "CLANG_PATH=$HOME/toolchain/clang/bin" >> $GITHUB_OUTPUT
-          echo "=== Clang Toolchain Ready ==="
-          ls $HOME/toolchain/clang/bin/ | head -20
-          $HOME/toolchain/clang/bin/clang --version || true
+          echo "=== Clang Ready ==="
+          $HOME/toolchain/clang/bin/clang --version
 
-      - name: Download GCC Cross Compiler (aarch64 & arm)
+      - name: Download GCC Cross Compiler
         id: gcc
         run: |
           echo "=== Downloading GCC Cross Compiler ==="
           mkdir -p $HOME/toolchain/gcc-arm64
           mkdir -p $HOME/toolchain/gcc-arm
-          
+
           cd $HOME/toolchain/gcc-arm64
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git .
           rm -rf .git
-          
+
           cd $HOME/toolchain/gcc-arm
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git .
           rm -rf .git
-          
+
           echo "GCC_ARM64_PATH=$HOME/toolchain/gcc-arm64/bin" >> $GITHUB_OUTPUT
           echo "GCC_ARM_PATH=$HOME/toolchain/gcc-arm/bin" >> $GITHUB_OUTPUT
           echo "=== GCC Cross Compiler Ready ==="
@@ -131,10 +106,8 @@ jobs:
         run: |
           echo "PATH=${{ steps.clang.outputs.CLANG_PATH }}:${{ steps.gcc.outputs.GCC_ARM64_PATH }}:${{ steps.gcc.outputs.GCC_ARM_PATH }}:${PATH}" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=${{ steps.clang.outputs.CLANG_PATH }}/../lib64:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
-          echo "KERNEL_DIR=$(pwd)" >> $GITHUB_ENV
           echo "OUT_DIR=$(pwd)/out" >> $GITHUB_ENV
-          
-          # Generate version string
+
           COMMIT_HASH=$(git rev-parse --short HEAD)
           BUILD_DATE=$(date +%Y%m%d)
           if [ -n "${{ inputs.kernel_version }}" ]; then
@@ -143,21 +116,19 @@ jobs:
             VERSION="${BUILD_DATE}-${COMMIT_HASH}"
           fi
           echo "KERNEL_VERSION=${VERSION}" >> $GITHUB_ENV
-          echo "ZIP_NAME=Melt-Kernel-${DEVICE}-${VERSION}.zip" >> $GITHUB_ENV
+          echo "ZIP_NAME=Melt-Kernel-marble-${VERSION}.zip" >> $GITHUB_ENV
           echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
           echo "COMMIT_HASH=${COMMIT_HASH}" >> $GITHUB_ENV
-          
+
           echo "=== Build Configuration ==="
           echo "Device: ${{ env.DEVICE_NAME }}"
           echo "Defconfig: ${{ env.DEFCONFIG }}"
           echo "Version: ${VERSION}"
-          echo "Output: $(pwd)/out"
-          echo "Zip Name: Melt-Kernel-${DEVICE}-${VERSION}.zip"
+          echo "Zip Name: Melt-Kernel-marble-${VERSION}.zip"
 
       - name: Clean Build Directory
         run: |
           echo "=== Cleaning Previous Build ==="
-          make -j$(nproc --all) ARCH=${{ env.ARCH }} O=${{ env.OUT_DIR }} mrproper || true
           rm -rf ${{ env.OUT_DIR }}
           mkdir -p ${{ env.OUT_DIR }}
           echo "=== Clean Complete ==="
@@ -179,11 +150,10 @@ jobs:
         run: |
           echo "=== Starting Kernel Build ==="
           echo "Using $(nproc --all) CPU cores"
-          echo "Clang: $(which clang)"
           clang --version
-          
+
           BUILD_START=$(date +%s)
-          
+
           make -j$(nproc --all) \
             ARCH=${{ env.ARCH }} \
             SUBARCH=${{ env.SUBARCH }} \
@@ -191,13 +161,12 @@ jobs:
             LLVM_IAS=1 \
             O=${{ env.OUT_DIR }} \
             2>&1 | tee ${{ env.OUT_DIR }}/build.log
-          
+
           BUILD_END=$(date +%s)
           BUILD_TIME=$((BUILD_END - BUILD_START))
           echo "BUILD_TIME=${BUILD_TIME}" >> $GITHUB_OUTPUT
           echo "=== Build Completed in ${BUILD_TIME} seconds ==="
-          
-          # Check if build was successful
+
           if [ -f "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE }}" ]; then
             echo "BUILD_SUCCESS=true" >> $GITHUB_OUTPUT
             echo "=== Kernel Image Found ==="
@@ -213,50 +182,23 @@ jobs:
       - name: Build DTB & DTBO
         if: steps.build.outputs.BUILD_SUCCESS == 'true'
         run: |
-          echo "=== Building DTB ==="
+          echo "=== Building DTB & DTBO ==="
           make -j$(nproc --all) \
             ARCH=${{ env.ARCH }} \
             SUBARCH=${{ env.SUBARCH }} \
             LLVM=1 \
             LLVM_IAS=1 \
             O=${{ env.OUT_DIR }} \
-            dtbs dtbo.img 2>&1 || echo "DTB/DTBO build step completed (some warnings may appear)"
-          
-          echo "=== Checking DTB Output ==="
-          ls -la ${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dts/ 2>/dev/null || true
-          ls -la ${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtbo.img 2>/dev/null || true
-          
-          # Create dtb (merged) if available
+            dtbs dtbo.img 2>&1 || echo "DTB/DTBO build completed"
+
+          # Create merged dtb
           if [ -d "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dts/vendor/qcom" ]; then
             cat ${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dts/vendor/qcom/*.dtb > ${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtb 2>/dev/null || true
             echo "=== Created merged dtb ==="
           fi
 
-      - name: Build Modules
-        if: steps.build.outputs.BUILD_SUCCESS == 'true'
-        run: |
-          echo "=== Building Kernel Modules ==="
-          make -j$(nproc --all) \
-            ARCH=${{ env.ARCH }} \
-            SUBARCH=${{ env.SUBARCH }} \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            O=${{ env.OUT_DIR }} \
-            modules 2>&1 || echo "Modules build completed"
-          
-          echo "=== Installing Modules ==="
-          mkdir -p ${{ env.OUT_DIR }}/modules_install
-          make -j$(nproc --all) \
-            ARCH=${{ env.ARCH }} \
-            SUBARCH=${{ env.SUBARCH }} \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            O=${{ env.OUT_DIR }} \
-            INSTALL_MOD_PATH=${{ env.OUT_DIR }}/modules_install \
-            modules_install 2>&1 || echo "Modules install completed"
-          
-          echo "=== Modules Ready ==="
-          find ${{ env.OUT_DIR }}/modules_install -name "*.ko" | head -20 || true
+          ls -la ${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtb 2>/dev/null || true
+          ls -la ${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtbo.img 2>/dev/null || true
 
       - name: Prepare AnyKernel3 Package
         if: steps.build.outputs.BUILD_SUCCESS == 'true'
@@ -265,86 +207,49 @@ jobs:
           echo "=== Cloning AnyKernel3 ==="
           git clone --depth=1 -b ${{ env.ANYKERNEL_BRANCH }} ${{ env.ANYKERNEL_REPO }} ${{ env.OUT_DIR }}/AnyKernel3
           rm -rf ${{ env.OUT_DIR }}/AnyKernel3/.git
-          
+
           echo "=== Copying Kernel Files ==="
-          # Copy kernel image
           cp -f ${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE }} ${{ env.OUT_DIR }}/AnyKernel3/
-          
-          # Copy dtb if exists
-          if [ -f "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtb" ]; then
-            cp -f ${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtb ${{ env.OUT_DIR }}/AnyKernel3/dtb
-          fi
-          
-          # Copy dtbo if exists
-          if [ -f "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtbo.img" ]; then
-            cp -f ${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtbo.img ${{ env.OUT_DIR }}/AnyKernel3/dtbo.img
-          fi
-          
+          [ -f "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtb" ] && cp -f ${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtb ${{ env.OUT_DIR }}/AnyKernel3/dtb
+          [ -f "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtbo.img" ] && cp -f ${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtbo.img ${{ env.OUT_DIR }}/AnyKernel3/dtbo.img
+
           echo "=== Configuring AnyKernel3 ==="
-          cat > ${{ env.OUT_DIR }}/AnyKernel3/anykernel.sh << 'ANYKERNEL_EOF'
-          # AnyKernel3 Ramdisk Mod Script
-          # osm0sis @ xda-developers
+          cat > ${{ env.OUT_DIR }}/AnyKernel3/anykernel.sh << 'AK3EOF'
+# AnyKernel3 Ramdisk Mod Script
+properties() {
+do.devicecheck=1
+do.modules=0
+do.systemless=1
+do.cleanup=1
+do.cleanuponabort=0
+device.name1=marble
+device.name2=marblein
+device.name3=
+device.name4=
+device.name5=
+supported.versions=
+supported.patchlevels=
+}
 
-          ## AnyKernel setup
-          # begin properties
-          properties() {
-          do.devicecheck=1
-          do.modules=0
-          do.systemless=1
-          do.cleanup=1
-          do.cleanuponabort=0
-          device.name1=marble
-          device.name2=marblein
-          device.name3=
-          device.name4=
-          device.name5=
-          supported.versions=
-          supported.patchlevels=
-          } # end properties
+block=/dev/block/bootdevice/by-name/boot;
+is_slot_device=1;
+ramdisk_compression=auto;
+patch_vbmeta_flag=auto;
 
-          # shell variables
-          block=/dev/block/bootdevice/by-name/boot;
-          is_slot_device=1;
-          ramdisk_compression=auto;
-          patch_vbmeta_flag=auto;
+. tools/ak3-core.sh;
 
-          ## AnyKernel methods (DO NOT CHANGE)
-          # import patching functions/variables - see for reference
-          . tools/ak3-core.sh;
+set_perm_recursive 0 0 755 644 $ramdisk/*;
+set_perm_recursive 0 0 755 755 $ramdisk/init* $ramdisk/sbin;
 
-          ## AnyKernel file attributes
-          # set permissions for included ramdisk files
-          set_perm_recursive 0 0 755 644 $ramdisk/*;
-          set_perm_recursive 0 0 755 755 $ramdisk/init* $ramdisk/sbin;
+dump_boot;
+split_boot;
+write_boot;
+AK3EOF
 
-          ## AnyKernel install
-          dump_boot;
-          split_boot;
-
-          # begin ramdisk changes
-          # end ramdisk changes
-
-          write_boot;
-
-          ## end install
-          ANYKERNEL_EOF
-          
-          # Create banner
-          cat > ${{ env.OUT_DIR }}/AnyKernel3/banner << 'BANNER_EOF'
-          __  __     _ _     _  __                    _ 
-          |  \/  |___| | |_  | |/ /___ _ __ _ __   ___| |
-          | |\/| / _ \ | __| | ' // _ \ '__| '_ \ / _ \ |
-          | |  |  __/ | |_  | . \  __/ |  | | | |  __/ |
-          |_|  |\___|_|\__| |_|\_\___|_|  |_| |_|\___|_|
-                                                        
-          Melt Kernel Rebase for marble / marblein
-          Redmi Note 12 Turbo / Poco F5
-          BANNER_EOF
-          
           echo "=== Creating Flashable ZIP ==="
           cd ${{ env.OUT_DIR }}/AnyKernel3
           zip -r9 ${{ env.OUT_DIR }}/${{ env.ZIP_NAME }} * -x .git README.md *placeholder
-          
+
           echo "ZIP_PATH=${{ env.OUT_DIR }}/${{ env.ZIP_NAME }}" >> $GITHUB_OUTPUT
           echo "=== ZIP Created: ${{ env.ZIP_NAME }} ==="
           ls -la ${{ env.OUT_DIR }}/${{ env.ZIP_NAME }}
@@ -353,39 +258,39 @@ jobs:
         if: steps.build.outputs.BUILD_SUCCESS == 'true'
         run: |
           cat > ${{ env.OUT_DIR }}/build-info.txt << EOF
-          ========================================
-          Melt Kernel Build Information
-          ========================================
-          Device: ${{ env.DEVICE_NAME }} (${{ env.DEVICE }})
-          Kernel Version: ${{ env.KERNEL_VERSION }}
-          Build Date: ${{ env.BUILD_DATE }}
-          Commit Hash: ${{ env.COMMIT_HASH }}
-          Source: ${{ env.KERNEL_SOURCE }}
-          Branch: ${{ env.KERNEL_BRANCH }}
-          Defconfig: ${{ env.DEFCONFIG }}
-          Architecture: ${{ env.ARCH }}
-          Toolchain: AOSP Clang r416183b (LLVM)
-          Build Time: ${{ steps.build.outputs.BUILD_TIME }} seconds
-          ZIP File: ${{ env.ZIP_NAME }}
-          ========================================
-          EOF
+========================================
+Melt Kernel Build Information
+========================================
+Device: ${{ env.DEVICE_NAME }} (marble)
+Kernel Version: ${{ env.KERNEL_VERSION }}
+Build Date: ${{ env.BUILD_DATE }}
+Commit Hash: ${{ env.COMMIT_HASH }}
+Source: ${{ env.KERNEL_SOURCE }}
+Branch: ${{ env.KERNEL_BRANCH }}
+Defconfig: ${{ env.DEFCONFIG }}
+Architecture: ${{ env.ARCH }}
+Toolchain: AOSP Clang r416183b (LLVM)
+Build Time: ${{ steps.build.outputs.BUILD_TIME }} seconds
+ZIP File: ${{ env.ZIP_NAME }}
+========================================
+EOF
           cat ${{ env.OUT_DIR }}/build-info.txt
 
       - name: Upload Kernel Flashable ZIP
         if: steps.build.outputs.BUILD_SUCCESS == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: Melt-Kernel-${{ env.DEVICE }}-${{ env.KERNEL_VERSION }}
+          name: Melt-Kernel-marble-${{ env.KERNEL_VERSION }}
           path: |
             ${{ env.OUT_DIR }}/${{ env.ZIP_NAME }}
             ${{ env.OUT_DIR }}/build-info.txt
           if-no-files-found: error
 
-      - name: Upload Kernel Image (separate)
+      - name: Upload Kernel Image
         if: steps.build.outputs.BUILD_SUCCESS == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Image-${{ env.DEVICE }}-${{ env.KERNEL_VERSION }}
+          name: Kernel-Image-marble-${{ env.KERNEL_VERSION }}
           path: |
             ${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE }}
             ${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtb
@@ -396,7 +301,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Build-Log-${{ env.DEVICE }}-${{ env.KERNEL_VERSION }}
+          name: Build-Log-marble-${{ env.KERNEL_VERSION }}
           path: ${{ env.OUT_DIR }}/build.log
           if-no-files-found: warn
 
@@ -410,19 +315,19 @@ jobs:
           tag_name: Melt-marble-${{ env.KERNEL_VERSION }}
           name: Melt-marble-${{ env.KERNEL_VERSION }}
           body: |
-            ## Melt Kernel - ${{ env.DEVICE_NAME }}
-            
-            **Device:** ${{ env.DEVICE }} / marblein
+            ## Melt Kernel - Redmi Note 12 Turbo / Poco F5
+
+            **Device:** marble / marblein
             **Version:** ${{ env.KERNEL_VERSION }}
             **Build Date:** ${{ env.BUILD_DATE }}
             **Commit:** `${{ env.COMMIT_HASH }}`
             **Source:** ${{ env.KERNEL_SOURCE }}
-            
+
             ### Notes
             - Flash via custom recovery (TWRP/OrangeFox)
             - Built with AOSP Clang r416183b (LLVM)
             - Defconfig: `${{ env.DEFCONFIG }}`
-            
+
             ### Files
             - `${{ env.ZIP_NAME }}` - Flashable kernel zip
           files: |
