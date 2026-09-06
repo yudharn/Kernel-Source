@@ -1,256 +1,344 @@
-name: Build Melt Kernel
+name: Build Kernel (android12-5.10-lts)
 
-"on":
-  push:
-    branches: ["melt-rebase"]
-  pull_request:
-    branches: ["melt-rebase"]
+on:
   workflow_dispatch:
     inputs:
-      kernel_version:
-        description: "Kernel Version Name (e.g., v5.2)"
+      kernel_source:
+        description: "URL kernel source"
+        required: true
+        default: "https://github.com/yudharn/Kernel-Source"
+      kernel_branch:
+        description: "Branch kernel"
+        required: true
+        default: "android12-5.10-lts"
+      build_method:
+        description: "Metode build"
+        required: true
+        default: "auto"
+        type: choice
+        options:
+          - auto        # Deteksi otomatis
+          - build_sh    # build.sh (struktur GKI penuh: common/ + build/)
+          - make        # make langsung (struktur kernel biasa)
+      defconfig:
+        description: "Defconfig (kosongkan untuk auto-detect gki_defconfig)"
         required: false
         default: ""
-      create_release:
-        description: "Create GitHub Release?"
+      clang_version:
+        description: "Versi AOSP Clang"
+        required: true
+        default: "clang-r530567"
+        type: choice
+        options:
+          - clang-r530567
+          - clang-r487789
+          - clang-r450784e
+          - clang-r416183b
+      enable_lto:
+        description: "Aktifkan LTO=thin?"
+        required: true
+        default: true
         type: boolean
-        required: false
+      enable_kernelsu:
+        description: "Integrasi KernelSU?"
+        required: true
         default: false
+        type: boolean
+      enable_susfs:
+        description: "Integrasi SUSFS? (perlu KernelSU aktif)"
+        required: true
+        default: false
+        type: boolean
+      enable_anykernel3:
+        description: "Pack AnyKernel3?"
+        required: true
+        default: false
+        type: boolean
+      upload_release:
+        description: "Upload ke GitHub Release?"
+        required: true
+        default: false
+        type: boolean
 
 env:
-  KERNEL_SOURCE: "https://github.com/yudharn/Kernel-Source"
-  KERNEL_BRANCH: "android12-5.10-lts"
-  DEFCONFIG: "marble_defconfig"
-  ARCH: "arm64"
-  SUBARCH: "arm64"
-  DEVICE: "marble"
-  DEVICE_NAME: "Redmi Note 12 Turbo / Poco F5"
-  ANYKERNEL_REPO: "https://github.com/osm0sis/AnyKernel3.git"
-  ANYKERNEL_BRANCH: "master"
-  KERNEL_IMAGE: "Image"
-  AK3_B64: "IyBBbnlLZXJuZWwzIFJhbWRpc2sgTW9kIFNjcmlwdApwcm9wZXJ0aWVzKCkgewpkby5kZXZpY2VjaGVjaz0xCmRvLm1vZHVsZXM9MApkby5zeXN0ZW1sZXNzPTEKZG8uY2xlYW51cD0xCmRvLmNsZWFudXBvbmFib3J0PTAKZGV2aWNlLm5hbWUxPW1hcmJsZQpkZXZpY2UubmFtZTI9bWFyYmxlaW4KZGV2aWNlLm5hbWUzPQpkZXZpY2UubmFtZTQ9CmRldmljZS5uYW1lNT0Kc3VwcG9ydGVkLnZlcnNpb25zPQpzdXBwb3J0ZWQucGF0Y2hsZXZlbHM9Cn0KCmJsb2NrPS9kZXYvYmxvY2svYm9vdGRldmljZS9ieS1uYW1lL2Jvb3Q7CmlzX3Nsb3RfZGV2aWNlPTE7CnJhbWRpc2tfY29tcHJlc3Npb249YXV0bzsKcGF0Y2hfdmJtZXRhX2ZsYWc9YXV0bzsKCi4gdG9vbHMvYWszLWNvcmUuc2g7CgpzZXRfcGVybV9yZWN1cnNpdmUgMCAwIDc1NSA2NDQgJHJhbWRpc2svKjsKc2V0X3Blcm1fcmVjdXJzaXZlIDAgMCA3NTUgNzU1ICRyYW1kaXNrL2luaXQqICRyYW1kaXNrL3NiaW47CgpkdW1wX2Jvb3Q7CnNwbGl0X2Jvb3Q7CndyaXRlX2Jvb3Q7Cg=="
-
-permissions:
-  contents: write
+  TZ: Asia/Jakarta
+  CCACHE_COMPILERCHECK: "%compiler% -dumpmachine && %compiler% -dumpversion"
+  CCACHE_MAXSIZE: 2G
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  ANYKERNEL3_URL: https://github.com/osm0sis/AnyKernel3.git
 
 jobs:
   build:
-    name: Build Kernel for marble
+    name: Build ${{ github.event.inputs.kernel_branch }}
     runs-on: ubuntu-latest
+    env:
+      KERNEL_DIR: ${{ github.workspace }}/kernel
+      OUT_DIR: ${{ github.workspace }}/out
+      TOOLCHAIN_DIR: ${{ github.workspace }}/toolchain
 
     steps:
-      - name: Checkout Kernel Source
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.KERNEL_SOURCE }}
-          ref: ${{ env.KERNEL_BRANCH }}
-          fetch-depth: 1
-          submodules: recursive
-
-      - name: Setup Build Environment
+      # ══════════════════════════════════════════════
+      # 1. Checkout kernel source
+      # ══════════════════════════════════════════════
+      - name: Checkout kernel source
         run: |
-          echo "=== Installing Build Dependencies ==="
+          echo "Cloning ${{ github.event.inputs.kernel_source }} (branch: ${{ github.event.inputs.kernel_branch }})..."
+          git clone --depth=1 --single-branch \
+            -b ${{ github.event.inputs.kernel_branch }} \
+            ${{ github.event.inputs.kernel_source }} \
+            $KERNEL_DIR
+
+      # ══════════════════════════════════════════════
+      # 2. Setup build environment
+      # ══════════════════════════════════════════════
+      - name: Setup build environment
+        run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev curl wget git zip unzip python3 python3-pip libncurses-dev zstd cpio kmod
-          echo "=== Dependencies Installed ==="
-          make --version
+          sudo apt-get install -y -qq \
+            bc bison build-essential ccache cpio curl flex git gnupg \
+            libelf-dev libssl-dev lzip lz4 python3 python3-pip repo \
+            rsync unzip zip zstd
+          git config --global user.name  "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          # Baca versi kernel dari Makefile (common/ atau root)
+          MAKEFILE="$KERNEL_DIR/Makefile"
+          [ -f "$KERNEL_DIR/common/Makefile" ] && MAKEFILE="$KERNEL_DIR/common/Makefile"
+          echo "KERNEL_VER=$(grep -m1 '^VERSION' $MAKEFILE | awk -F= '{print $2}' | xargs).$(grep -m1 '^PATCHLEVEL' $MAKEFILE | awk -F= '{print $2}' | xargs).$(grep -m1 '^SUBLEVEL' $MAKEFILE | awk -F= '{print $2}' | xargs)" >> $GITHUB_ENV
+          echo "✅ Kernel version terdeteksi"
 
-      - name: Download AOSP Clang Toolchain
-        id: clang
-        run: |
-          echo "=== Downloading AOSP Clang r416183b ==="
-          mkdir -p $HOME/toolchain/clang
-          cd $HOME/toolchain/clang
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r416183b.git .
-          rm -rf .git
-          echo "CLANG_PATH=$HOME/toolchain/clang/bin" >> "$GITHUB_OUTPUT"
-          echo "=== Clang Ready ==="
-          "$HOME/toolchain/clang/bin/clang" --version
+      # ══════════════════════════════════════════════
+      # 3. Cache ccache (build berikutnya lebih cepat)
+      # ══════════════════════════════════════════════
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ github.event.inputs.kernel_branch }}-${{ github.event.inputs.defconfig }}
+          max-size: 2G
 
-      - name: Download GCC Cross Compiler
-        id: gcc
+      # ══════════════════════════════════════════════
+      # 4. Download AOSP Clang toolchain
+      # ══════════════════════════════════════════════
+      - name: Download toolchain
         run: |
-          echo "=== Downloading GCC Cross Compiler ==="
-          mkdir -p $HOME/toolchain/gcc-arm64
-          mkdir -p $HOME/toolchain/gcc-arm
-          cd $HOME/toolchain/gcc-arm64
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git .
-          rm -rf .git
-          cd $HOME/toolchain/gcc-arm
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git .
-          rm -rf .git
-          echo "GCC_ARM64_PATH=$HOME/toolchain/gcc-arm64/bin" >> "$GITHUB_OUTPUT"
-          echo "GCC_ARM_PATH=$HOME/toolchain/gcc-arm/bin" >> "$GITHUB_OUTPUT"
-          echo "=== GCC Cross Compiler Ready ==="
+          CLANG_VER="${{ github.event.inputs.clang_version }}"
+          echo "Mengunduh $CLANG_VER..."
+          mkdir -p $TOOLCHAIN_DIR/clang
+          curl -sL "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/${CLANG_VER}.tar.gz" \
+            -o clang.tar.gz
+          tar -xzf clang.tar.gz -C $TOOLCHAIN_DIR/clang
+          rm -f clang.tar.gz
+          echo "CLANG_BIN=$TOOLCHAIN_DIR/clang/bin" >> $GITHUB_ENV
+          $TOOLCHAIN_DIR/clang/bin/clang --version | head -1
 
-      - name: Setup Environment Variables
+      # ══════════════════════════════════════════════
+      # 5. Integrasi KernelSU (opsional)
+      # ══════════════════════════════════════════════
+      - name: Integrate KernelSU
+        if: github.event.inputs.enable_kernelsu == 'true'
+        working-directory: kernel
         run: |
-          echo "PATH=${{ steps.clang.outputs.CLANG_PATH }}:${{ steps.gcc.outputs.GCC_ARM64_PATH }}:${{ steps.gcc.outputs.GCC_ARM_PATH }}:${PATH}" >> "$GITHUB_ENV"
-          echo "OUT_DIR=$(pwd)/out" >> "$GITHUB_ENV"
-          COMMIT_HASH=$(git rev-parse --short HEAD)
-          BUILD_DATE=$(date +%Y%m%d)
-          if [ -n "${{ inputs.kernel_version }}" ]; then
-            VERSION="${{ inputs.kernel_version }}"
+          echo "Menerapkan KernelSU..."
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+          # Patch masuk ke common/ (struktur GKI) atau root
+          echo "✅ KernelSU siap"
+
+      # ══════════════════════════════════════════════
+      # 6. Integrasi SUSFS (opsional, butuh KernelSU)
+      # ══════════════════════════════════════════════
+      - name: Integrate SUSFS
+        if: github.event.inputs.enable_susfs == 'true' && github.event.inputs.enable_kernelsu == 'true'
+        working-directory: kernel
+        run: |
+          echo "Menerapkan SUSFS untuk android12-5.10..."
+          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 $GITHUB_WORKSPACE/susfs
+          
+          # Tentukan target patch (common/ atau root)
+          TARGET="."
+          [ -d "common" ] && TARGET="common"
+          
+          cp $GITHUB_WORKSPACE/susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU/ 2>/dev/null || true
+          cp $GITHUB_WORKSPACE/susfs/kernel_patches/50_add_susfs_in_kernel-5.10.patch $TARGET/
+          cp $GITHUB_WORKSPACE/susfs/kernel_patches/fs/* $TARGET/fs/
+          cp $GITHUB_WORKSPACE/susfs/kernel_patches/include/linux/* $TARGET/include/linux/
+          
+          cd ./KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch
+          cd ../$TARGET && patch -p1 < 50_add_susfs_in_kernel-5.10.patch
+          echo "✅ SUSFS siap"
+
+      # ══════════════════════════════════════════════
+      # 7. Deteksi metode build & defconfig
+      # ══════════════════════════════════════════════
+      - name: Detect build structure
+        working-directory: kernel
+        run: |
+          METHOD="${{ github.event.inputs.build_method }}"
+          echo "Struktur repo:"
+          ls -1 | head -20
+          
+          if [ "$METHOD" == "auto" ]; then
+            if [ -f "build/build.sh" ] && [ -f "common/build.config.gki.aarch64" ]; then
+              METHOD="build_sh"
+            else
+              METHOD="make"
+            fi
+          fi
+          echo "BUILD_METHOD=$METHOD" >> $GITHUB_ENV
+          echo "🔧 Metode build: $METHOD"
+          
+          # Tentukan defconfig
+          INPUT_DEF="${{ github.event.inputs.defconfig }}"
+          if [ -n "$INPUT_DEF" ]; then
+            DEFCONFIG="$INPUT_DEF"
+          elif [ -f "common/arch/arm64/configs/gki_defconfig" ]; then
+            DEFCONFIG="gki_defconfig"
+          elif [ -f "arch/arm64/configs/gki_defconfig" ]; then
+            DEFCONFIG="gki_defconfig"
           else
-            VERSION="${BUILD_DATE}-${COMMIT_HASH}"
+            DEFCONFIG=$(ls arch/arm64/configs/ 2>/dev/null | head -1)
           fi
-          echo "KERNEL_VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "ZIP_NAME=Melt-Kernel-marble-${VERSION}.zip" >> "$GITHUB_ENV"
-          echo "BUILD_DATE=${BUILD_DATE}" >> "$GITHUB_ENV"
-          echo "COMMIT_HASH=${COMMIT_HASH}" >> "$GITHUB_ENV"
-          echo "=== Build Configuration ==="
-          echo "Device: ${{ env.DEVICE_NAME }}"
-          echo "Defconfig: ${{ env.DEFCONFIG }}"
-          echo "Version: ${VERSION}"
+          echo "DEFCONFIG=$DEFCONFIG" >> $GITHUB_ENV
+          echo "📋 Defconfig: $DEFCONFIG"
 
-      - name: Clean Build Directory
+      # ══════════════════════════════════════════════
+      # 8A. Build dengan build.sh (struktur GKI penuh)
+      # ══════════════════════════════════════════════
+      - name: Build with build.sh
+        if: env.BUILD_METHOD == 'build_sh'
+        working-directory: kernel
         run: |
-          echo "=== Cleaning Previous Build ==="
-          rm -rf "${{ env.OUT_DIR }}"
-          mkdir -p "${{ env.OUT_DIR }}"
-          echo "=== Clean Complete ==="
+          export PATH="$CLANG_BIN:$PATH"
+          LTO_FLAG=""
+          [ "${{ github.event.inputs.enable_lto }}" == "true" ] && LTO_FLAG="LTO=thin"
+          
+          $LTO_FLAG BUILD_CONFIG=common/build.config.gki.aarch64 \
+            build/build.sh 2>&1 | tee $GITHUB_WORKSPACE/build.log
+          
+          echo "DIST_DIR=$(find $GITHUB_WORKSPACE/out -name dist -type d | head -1)" >> $GITHUB_ENV
 
-      - name: Generate Defconfig
+      # ══════════════════════════════════════════════
+      # 8B. Build dengan make (struktur kernel biasa)
+      # ══════════════════════════════════════════════
+      - name: Build with make
+        if: env.BUILD_METHOD == 'make'
+        working-directory: kernel
         run: |
-          echo "=== Generating Defconfig: ${{ env.DEFCONFIG }} ==="
-          make -j"$(nproc --all)" ARCH="${{ env.ARCH }}" SUBARCH="${{ env.SUBARCH }}" LLVM=1 LLVM_IAS=1 O="${{ env.OUT_DIR }}" "${{ env.DEFCONFIG }}"
-          echo "=== Defconfig Generated ==="
-
-      - name: Build Kernel
-        id: build
-        run: |
-          echo "=== Starting Kernel Build ==="
-          echo "Using $(nproc --all) CPU cores"
-          clang --version
-          BUILD_START=$(date +%s)
-          make -j"$(nproc --all)" ARCH="${{ env.ARCH }}" SUBARCH="${{ env.SUBARCH }}" LLVM=1 LLVM_IAS=1 O="${{ env.OUT_DIR }}" 2>&1 | tee "${{ env.OUT_DIR }}/build.log"
-          BUILD_END=$(date +%s)
-          BUILD_TIME=$((BUILD_END - BUILD_START))
-          echo "BUILD_TIME=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
-          echo "=== Build Completed in ${BUILD_TIME} seconds ==="
-          if [ -f "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE }}" ]; then
-            echo "BUILD_SUCCESS=true" >> "$GITHUB_OUTPUT"
-            echo "=== Kernel Image Found ==="
-            ls -la "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/"
+          export PATH="$CLANG_BIN:$PATH"
+          
+          # KernelSU config
+          if [ "${{ github.event.inputs.enable_kernelsu }}" == "true" ]; then
+            make O=$OUT_DIR ARCH=arm64 LLVM=1 LLVM_IAS=1 ${{ env.DEFCONFIG }}
+            ./scripts/config --file $OUT_DIR/.config -e KSU
+            [ "${{ github.event.inputs.enable_susfs }}" == "true" ] && ./scripts/config --file $OUT_DIR/.config -e KSU_SUSFS
+            make O=$OUT_DIR ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig
           else
-            echo "BUILD_SUCCESS=false" >> "$GITHUB_OUTPUT"
-            echo "=== ERROR: Kernel Image NOT Found ==="
-            tail -50 "${{ env.OUT_DIR }}/build.log"
-            exit 1
+            make O=$OUT_DIR ARCH=arm64 LLVM=1 LLVM_IAS=1 ${{ env.DEFCONFIG }}
           fi
+          
+          make O=$OUT_DIR ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang LD=ld.lld \
+            -j$(nproc) Image.gz dtb dtbo 2>&1 | tee $GITHUB_WORKSPACE/build.log
+          
+          echo "DIST_DIR=$OUT_DIR/arch/arm64/boot" >> $GITHUB_ENV
 
-      - name: Build DTB and DTBO
-        if: steps.build.outputs.BUILD_SUCCESS == 'true'
+      # ══════════════════════════════════════════════
+      # 9. Kumpulkan hasil build
+      # ══════════════════════════════════════════════
+      - name: Collect build artifacts
         run: |
-          echo "=== Building DTB and DTBO ==="
-          make -j"$(nproc --all)" ARCH="${{ env.ARCH }}" SUBARCH="${{ env.SUBARCH }}" LLVM=1 LLVM_IAS=1 O="${{ env.OUT_DIR }}" dtbs dtbo.img 2>&1 || echo "DTB/DTBO build completed"
-          if [ -d "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dts/vendor/qcom" ]; then
-            cat "${{ env.OUT_DIR }}"/arch/${{ env.ARCH }}/boot/dts/vendor/qcom/*.dtb > "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtb" 2>/dev/null || true
-            echo "=== Created merged dtb ==="
-          fi
-          ls -la "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtb" 2>/dev/null || true
-          ls -la "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtbo.img" 2>/dev/null || true
+          mkdir -p $GITHUB_WORKSPACE/output
+          echo "Mencari hasil di $DIST_DIR ..."
+          
+          # Salin semua file penting
+          for f in Image Image.gz Image.lz4 dtbo.img *.dtb; do
+            find $DIST_DIR -name "$f" -exec cp -v {} $GITHUB_WORKSPACE/output/ \; 2>/dev/null || true
+          done
+          
+          ls -lh $GITHUB_WORKSPACE/output/
+          [ -z "$(ls -A $GITHUB_WORKSPACE/output)" ] && { echo "::error::Tidak ada hasil build!"; exit 1; }
 
-      - name: Prepare AnyKernel3 Package
-        if: steps.build.outputs.BUILD_SUCCESS == 'true'
-        id: anykernel
+      # ══════════════════════════════════════════════
+      # 10. Packaging AnyKernel3 (opsional)
+      # ══════════════════════════════════════════════
+      - name: Package AnyKernel3
+        if: github.event.inputs.enable_anykernel3 == 'true'
         run: |
-          echo "=== Cloning AnyKernel3 ==="
-          git clone --depth=1 -b "${{ env.ANYKERNEL_BRANCH }}" "${{ env.ANYKERNEL_REPO }}" "${{ env.OUT_DIR }}/AnyKernel3"
-          rm -rf "${{ env.OUT_DIR }}/AnyKernel3/.git"
-          echo "=== Copying Kernel Files ==="
-          cp -f "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE }}" "${{ env.OUT_DIR }}/AnyKernel3/"
-          test -f "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtb" && cp -f "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtb" "${{ env.OUT_DIR }}/AnyKernel3/dtb"
-          test -f "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtbo.img" && cp -f "${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtbo.img" "${{ env.OUT_DIR }}/AnyKernel3/dtbo.img"
-          echo "=== Writing AnyKernel3 config ==="
-          echo "${{ env.AK3_B64 }}" | base64 -d > "${{ env.OUT_DIR }}/AnyKernel3/anykernel.sh"
-          echo "=== Creating Flashable ZIP ==="
-          cd "${{ env.OUT_DIR }}/AnyKernel3"
-          zip -r9 "${{ env.OUT_DIR }}/${{ env.ZIP_NAME }}" . -x .git README.md "*placeholder"
-          echo "ZIP_PATH=${{ env.OUT_DIR }}/${{ env.ZIP_NAME }}" >> "$GITHUB_OUTPUT"
-          echo "=== ZIP Created: ${{ env.ZIP_NAME }} ==="
-          ls -la "${{ env.OUT_DIR }}/${{ env.ZIP_NAME }}"
+          BUILD_TAG="Kernel-${{ github.event.inputs.kernel_branch }}-$(date +%Y%m%d-%H%M)"
+          AK_DIR="$GITHUB_WORKSPACE/AnyKernel3"
+          git clone --depth=1 $ANYKERNEL3_URL $AK_DIR
+          cd $AK_DIR
+          rm -rf .git .gitignore README.md LICENSE *.sh modules ramdisk
+          
+          cp $GITHUB_WORKSPACE/output/Image.gz ./ 2>/dev/null || cp $GITHUB_WORKSPACE/output/Image ./
+          cp $GITHUB_WORKSPACE/output/dtbo.img ./ 2>/dev/null || true
+          cat $GITHUB_WORKSPACE/output/*.dtb > ./dtb 2>/dev/null || true
+          
+          sed -i "s/kernel.string=.*/kernel.string=Custom Kernel ${{ github.event.inputs.kernel_branch }}/" anykernel.sh
+          sed -i "s/do.devicecheck=.*/do.devicecheck=0/" anykernel.sh
+          
+          zip -r9 "$BUILD_TAG.zip" . -x "*.git*"
+          mv "$BUILD_TAG.zip" $GITHUB_WORKSPACE/output/
 
-      - name: Create Build Info
-        if: steps.build.outputs.BUILD_SUCCESS == 'true'
+      # ══════════════════════════════════════════════
+      # 11. Generate build info
+      # ══════════════════════════════════════════════
+      - name: Generate build info
         run: |
-          INFO_FILE="${{ env.OUT_DIR }}/build-info.txt"
-          echo "========================================" > "$INFO_FILE"
-          echo "Melt Kernel Build Information" >> "$INFO_FILE"
-          echo "========================================" >> "$INFO_FILE"
-          echo "Device: ${{ env.DEVICE_NAME }} (marble)" >> "$INFO_FILE"
-          echo "Kernel Version: ${{ env.KERNEL_VERSION }}" >> "$INFO_FILE"
-          echo "Build Date: ${{ env.BUILD_DATE }}" >> "$INFO_FILE"
-          echo "Commit Hash: ${{ env.COMMIT_HASH }}" >> "$INFO_FILE"
-          echo "Source: ${{ env.KERNEL_SOURCE }}" >> "$INFO_FILE"
-          echo "Branch: ${{ env.KERNEL_BRANCH }}" >> "$INFO_FILE"
-          echo "Defconfig: ${{ env.DEFCONFIG }}" >> "$INFO_FILE"
-          echo "Architecture: ${{ env.ARCH }}" >> "$INFO_FILE"
-          echo "Toolchain: AOSP Clang r416183b (LLVM)" >> "$INFO_FILE"
-          echo "Build Time: ${{ steps.build.outputs.BUILD_TIME }} seconds" >> "$INFO_FILE"
-          echo "ZIP File: ${{ env.ZIP_NAME }}" >> "$INFO_FILE"
-          echo "========================================" >> "$INFO_FILE"
-          cat "$INFO_FILE"
+          cat > $GITHUB_WORKSPACE/output/BUILD_INFO.md << EOF
+          # Kernel Build Info
+          - **Source:** ${{ github.event.inputs.kernel_source }}
+          - **Branch:** ${{ github.event.inputs.kernel_branch }}
+          - **Kernel:** ${KERNEL_VER}
+          - **Metode build:** ${{ env.BUILD_METHOD }}
+          - **Defconfig:** ${{ env.DEFCONFIG }}
+          - **Toolchain:** ${{ github.event.inputs.clang_version }}
+          - **LTO:** ${{ github.event.inputs.enable_lto }}
+          - **KernelSU:** ${{ github.event.inputs.enable_kernelsu }}
+          - **SUSFS:** ${{ github.event.inputs.enable_susfs }}
+          - **Build date:** $(date '+%Y-%m-%d %H:%M:%S %Z')
+          - **Built by:** @${{ github.actor }}
+          EOF
 
-      - name: Upload Kernel Flashable ZIP
-        if: steps.build.outputs.BUILD_SUCCESS == 'true'
+      # ══════════════════════════════════════════════
+      # 12. Upload artifacts
+      # ══════════════════════════════════════════════
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Melt-Kernel-marble-${{ env.KERNEL_VERSION }}
+          name: Kernel-${{ github.event.inputs.kernel_branch }}-${{ github.run_number }}
           path: |
-            ${{ env.OUT_DIR }}/${{ env.ZIP_NAME }}
-            ${{ env.OUT_DIR }}/build-info.txt
-          if-no-files-found: error
+            ${{ github.workspace }}/output/*
+            ${{ github.workspace }}/build.log
+          retention-days: 30
 
-      - name: Upload Kernel Image
-        if: steps.build.outputs.BUILD_SUCCESS == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kernel-Image-marble-${{ env.KERNEL_VERSION }}
-          path: |
-            ${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE }}
-            ${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtb
-            ${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dtbo.img
-          if-no-files-found: warn
-
-      - name: Upload Build Log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Build-Log-marble-${{ env.KERNEL_VERSION }}
-          path: ${{ env.OUT_DIR }}/build.log
-          if-no-files-found: warn
-
-      - name: Create GitHub Release
-        if: steps.build.outputs.BUILD_SUCCESS == 'true' && github.event_name == 'workflow_dispatch' && inputs.create_release == true
+      # ══════════════════════════════════════════════
+      # 13. Upload ke GitHub Release (opsional)
+      # ══════════════════════════════════════════════
+      - name: Create Release
+        if: github.event.inputs.upload_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: Melt-marble-${{ env.KERNEL_VERSION }}
-          name: Melt-marble-${{ env.KERNEL_VERSION }}
-          body: "## Melt Kernel - Redmi Note 12 Turbo / Poco F5\n\n**Device:** marble / marblein\n**Version:** ${{ env.KERNEL_VERSION }}\n**Build Date:** ${{ env.BUILD_DATE }}\n**Commit:** `${{ env.COMMIT_HASH }}`\n**Source:** ${{ env.KERNEL_SOURCE }}\n\n### Notes\n- Flash via custom recovery (TWRP/OrangeFox)\n- Built with AOSP Clang r416183b (LLVM)\n- Defconfig: `${{ env.DEFCONFIG }}`\n\n### Files\n- `${{ env.ZIP_NAME }}` - Flashable kernel zip"
-          files: |
-            ${{ env.OUT_DIR }}/${{ env.ZIP_NAME }}
-            ${{ env.OUT_DIR }}/build-info.txt
-          generate_release_notes: true
+          tag_name: v${{ github.run_number }}
+          name: Kernel Build #${{ github.run_number }}
+          body_path: ${{ github.workspace }}/output/BUILD_INFO.md
+          prerelease: true
+          files: ${{ github.workspace }}/output/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Summary
+      # ══════════════════════════════════════════════
+      # 14. Ringkasan build
+      # ══════════════════════════════════════════════
+      - name: Build summary
         if: always()
         run: |
-          echo "========================================"
-          echo "BUILD SUMMARY"
-          echo "========================================"
-          if [ "${{ steps.build.outputs.BUILD_SUCCESS }}" = "true" ]; then
-            echo "STATUS: SUCCESS"
-            echo "Device: ${{ env.DEVICE_NAME }}"
-            echo "Version: ${{ env.KERNEL_VERSION }}"
-            echo "Build Time: ${{ steps.build.outputs.BUILD_TIME }} seconds"
-            echo "Output ZIP: ${{ env.ZIP_NAME }}"
-            echo "========================================"
-            echo "Kernel is ready to flash!"
-          else
-            echo "STATUS: FAILED"
-            echo "Please check the build log for details."
-            echo "========================================"
-            exit 1
-          fi
+          echo "## 🔧 Kernel Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Nilai |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | ${{ github.event.inputs.kernel_branch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Kernel | ${KERNEL_VER} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Metode | ${{ env.BUILD_METHOD }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Toolchain | ${{ github.event.inputs.clang_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
           
