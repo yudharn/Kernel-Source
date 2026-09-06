@@ -14,7 +14,7 @@ jobs:
       KERNEL_BRANCH: "android12-5.10-lts"
       DEFCONFIG:     "marble_defconfig"             # path defconfig di arch/arm64/configs/
       DEVICE_NAME:   "marble"
-      ANYKERNEL_REPO: ""                                        # isi URL repo AnyKernel3, kosongkan jika tidak pakai
+      ANYKERNEL_REPO: "https://github.com/osm0sis/AnyKernel3"                                        # isi URL repo AnyKernel3, kosongkan jika tidak pakai
       # ====== KernelSU & SUSFS (jangan diubah kecuali paham) ======
       KSU_REPO:    "https://github.com/tiann/KernelSU.git"
       KSU_BRANCH:  "main"
