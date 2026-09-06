@@ -1,39 +1,40 @@
-name: Build android12-5.10-lts
+name: Build android12-5.10-lts (marble)
 
 on:
-  workflow_dispatch:   # tambah push:/schedule: kalau mau auto-build
+  workflow_dispatch:
+
+permissions:
+  contents: write   # wajib agar bisa membuat Release
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 360
 
     env:
-      # ====== WAJIB DISESUAIKAN ======
-      KERNEL_REPO:   "https://github.com/yudharn/Kernel-Source"   # repo kernel kamu
+      KERNEL_REPO:   "https://github.com/yudharn/Kernel-Source"
       KERNEL_BRANCH: "android12-5.10-lts"
-      DEFCONFIG:     "marble_defconfig"             # path defconfig di arch/arm64/configs/
-      DEVICE_NAME:   "marble"
-      ANYKERNEL_REPO: "https://github.com/osm0sis/AnyKernel3"                                        # isi URL repo AnyKernel3, kosongkan jika tidak pakai
-      # ====== KernelSU & SUSFS (jangan diubah kecuali paham) ======
+      DEFCONFIG:     "marble_defconfig"
+      DEVICE:        "marble"
+      ANYKERNEL_REPO: "https://github.com/osm0sis/AnyKernel3"
       KSU_REPO:    "https://github.com/tiann/KernelSU.git"
-      KSU_BRANCH:  "main"
       SUSFS_REPO:   "https://gitlab.com/simonpunk/susfs4ksu.git"
-      SUSFS_BRANCH: "gki-android12-5.10"   # branch yang benar untuk android12-5.10 (bukan master/kernel-5.10)
+      SUSFS_BRANCH: "gki-android12-5.10"
+      CLANG_URL: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183.tar.gz"
 
     steps:
       - name: Free up disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          sudo docker image prune -a -f || true
+          sudo apt-get clean
           df -h
 
       - name: Install dependencies
         run: |
-          sudo apt update
-          sudo apt install -y --no-install-recommends git ccache bc bison flex libssl-dev \
-            libelf-dev lz4 zstd build-essential libncurses-dev device-tree-compiler \
-            clang lld patch zip unzip gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git bc bison flex libssl-dev libelf-dev \
+            lz4 lzop zstd build-essential patch diffutils cpio zip unzip kmod \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
       - name: Clone kernel source
         run: git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
@@ -41,37 +42,35 @@ jobs:
       - name: Detect build structure
         id: detect
         run: |
-          cd kernel
-          if [ -d common ] && [ -f common/Makefile ]; then
+          if [ -d kernel/common ] && [ -f kernel/common/Makefile ]; then
             echo "kroot=common" >> "$GITHUB_OUTPUT"
           else
             echo "kroot=." >> "$GITHUB_OUTPUT"
           fi
-          if [ -f build.sh ]; then echo "has_build_sh=1" >> "$GITHUB_OUTPUT"; else echo "has_build_sh=0" >> "$GITHUB_OUTPUT"; fi
+          if [ -f kernel/build.sh ]; then echo "has_build_sh=1" >> "$GITHUB_OUTPUT"; else echo "has_build_sh=0" >> "$GITHUB_OUTPUT"; fi
 
       - name: Integrate KernelSU
         run: |
           KROOT=${{ steps.detect.outputs.kroot }}
-          git clone --depth=1 -b "$KSU_BRANCH" "$KSU_REPO" ksu-src
+          git clone --depth=1 "$KSU_REPO" ksu-src
           ln -sfn "$GITHUB_WORKSPACE/ksu-src/kernel" "kernel/$KROOT/KernelSU"
-          echo 'obj-y += KernelSU/'            >> "kernel/$KROOT/Makefile"
-          echo 'source "KernelSU/Kconfig"'     >> "kernel/$KROOT/Kconfig"
+          grep -q 'obj-y += KernelSU/' "kernel/$KROOT/Makefile" || echo 'obj-y += KernelSU/' >> "kernel/$KROOT/Makefile"
+          grep -q 'source "KernelSU/Kconfig"' "kernel/$KROOT/Kconfig" || sed -i '1i source "KernelSU/Kconfig"' "kernel/$KROOT/Kconfig"
           echo "✅ KernelSU siap"
 
       - name: Integrate SUSFS
         run: |
           set -e
           KROOT=${{ steps.detect.outputs.kroot }}
-          # Branch lama (master/kernel-5.10) sudah tidak punya patch 5.10 → wajib branch ini
           git clone --depth=1 -b "$SUSFS_BRANCH" "$SUSFS_REPO" susfs
 
-          # 1) Patch sisi KernelSU
-          cp susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ksu-src/
+          # Patch sisi KernelSU
+          cp -f susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ksu-src/
           (cd ksu-src && patch -p1 --forward < 10_enable_susfs_for_ksu.patch)
 
-          # 2) Patch + file sumber SUSFS ke kernel (nama patch baru!)
-          cp susfs/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch "kernel/$KROOT/"
-          cp -rf susfs/kernel_patches/fs/*           "kernel/$KROOT/fs/"
+          # Patch + sumber SUSFS ke kernel (nama patch yang benar untuk branch ini)
+          cp -f susfs/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch "kernel/$KROOT/"
+          cp -rf susfs/kernel_patches/fs/*            "kernel/$KROOT/fs/"
           cp -rf susfs/kernel_patches/include/linux/* "kernel/$KROOT/include/linux/"
           (cd "kernel/$KROOT" && patch -p1 --forward < 50_add_susfs_in_gki-android12-5.10.patch)
           echo "✅ SUSFS siap"
@@ -80,11 +79,19 @@ jobs:
         run: |
           KROOT=${{ steps.detect.outputs.kroot }}
           CFG="kernel/$KROOT/arch/arm64/configs/$DEFCONFIG"
-          cat >> "$CFG" <<EOF
-          CONFIG_KSU=y
-          CONFIG_KSU_SUSFS=y
-          EOF
-          echo "✅ Config ditambahkan ke $CFG"
+          for opt in KSU KSU_SUSFS KSU_SUSFS_SUS_PATH KSU_SUSFS_TRY_UMOUNT \
+                     KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT KSU_SUSFS_SUS_KSU_MOUNTINFO \
+                     KSU_SUSFS_SPOOF_PROC_CMDLINE KSU_SUSFS_ENABLE_LOG KSU_SUSFS_OPEN_REDIRECT; do
+            grep -q "CONFIG_$opt=" "$CFG" || echo "CONFIG_$opt=y" >> "$CFG"
+          done
+          echo "✅ Config disuntik ke $CFG"
+
+      - name: Prepare toolchain
+        if: steps.detect.outputs.has_build_sh == '0'
+        run: |
+          mkdir -p clang
+          curl -L "$CLANG_URL" | tar -xz -C clang
+          echo "$PWD/clang/bin" >> "$GITHUB_PATH"
 
       - name: Build with build.sh
         if: steps.detect.outputs.has_build_sh == '1'
@@ -94,47 +101,62 @@ jobs:
           ./build.sh
 
       - name: Build with make
-        if: steps.detect.outputs.has_build_sh != '1'
+        if: steps.detect.outputs.has_build_sh == '0'
         run: |
           KROOT=${{ steps.detect.outputs.kroot }}
           cd "kernel/$KROOT"
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip
-          make O=out "$DEFCONFIG"
-          make O=out olddefconfig
-          make O=out -j"$(nproc)"
+          make O="$PWD/out" ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            "$DEFCONFIG"
+          make O="$PWD/out" ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            -j"$(nproc)"
 
       - name: Collect build artifacts
         run: |
-          mkdir -p artifacts
-          IMG=$(find kernel -path "*boot*" -name "Image*" ! -name "*.dtb" | head -n 1)
-          echo "Image ditemukan: $IMG"
-          cp "$IMG" artifacts/Image
+          mkdir -p staging
+          find kernel -type f $ -name "Image" -o -name "Image.gz" $ -exec cp -v {} staging/ \;
+          ls -la staging
+          test -f staging/Image || test -f staging/Image.gz || { echo "❌ Image tidak ditemukan"; exit 1; }
 
       - name: Package AnyKernel3
-        if: env.ANYKERNEL_REPO != ''
         run: |
           git clone --depth=1 "$ANYKERNEL_REPO" ak3
-          cp artifacts/Image ak3/
-          cd ak3
-          zip -r9 "../artifacts/AnyKernel3-${DEVICE_NAME}-android12-5.10.zip" . -x ".git/*"
+          cp staging/Image* ak3/ 2>/dev/null || cp staging/Image ak3/
+          NAME="AnyKernel3-${DEVICE}-android12-5.10-$(date +%Y%m%d-%H%M)"
+          (cd ak3 && zip -r9 "../$NAME.zip" . -x ".git/*")
+          echo "ZIP_NAME=$NAME.zip" >> "$GITHUB_ENV"
 
       - name: Generate build info
         run: |
-          cat > artifacts/build-info.txt <<EOF
-          Device      : $DEVICE_NAME
-          Kernel      : android12-5.10-lts
-          Branch      : $KERNEL_BRANCH
-          KernelSU    : $KSU_BRANCH
-          SUSFS       : $SUSFS_BRANCH
-          Build date  : $(date -u)
-          EOF
-          cat artifacts/build-info.txt
+          {
+            echo "Device     : $DEVICE (Redmi Note 12 Turbo / POCO F5)"
+            echo "Kernel     : android12-5.10-lts"
+            echo "Source     : $KERNEL_REPO @ $KERNEL_BRANCH"
+            echo "Defconfig  : $DEFCONFIG"
+            echo "KernelSU   : $(git -C ksu-src log -1 --format='%h %s')"
+            echo "SUSFS      : $SUSFS_BRANCH"
+            echo "Build date : $(date -u)"
+          } > build-info.txt
+          cat build-info.txt
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-android12-5.10-${{ env.DEVICE_NAME }}
-          path: artifacts/
+          name: kernel-${{ env.DEVICE }}-android12-5.10
+          path: |
+            *.zip
+            build-info.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "android12-5.10-lts-$(date +%Y%m%d-%H%M)"
+          name: "KernelSU + SUSFS | ${{ env.DEVICE }} | android12-5.10-lts"
+          body_path: build-info.txt
+          files: ${{ env.ZIP_NAME }}
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
