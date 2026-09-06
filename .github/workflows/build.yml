@@ -18,8 +18,8 @@ name: Build Melt Kernel
         default: false
 
 env:
-  KERNEL_SOURCE: "https://github.com/yudharn/Pzqqt-Melt-Rebase.git"
-  KERNEL_BRANCH: "melt-rebase"
+  KERNEL_SOURCE: "https://github.com/yudharn/Kernel-Source"
+  KERNEL_BRANCH: "android12-5.10-lts"
   DEFCONFIG: "marble_defconfig"
   ARCH: "arm64"
   SUBARCH: "arm64"
